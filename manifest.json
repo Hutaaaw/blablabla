@@ -1,10 +1,10 @@
 {
-"Name": "CinderJoystick",
+"Name": "CinderJoyTap",
 "Author": "User",
 "Version": "1.2.0",
-"Description": "Integrates Stardew Valley Android's native Virtual Joypad with Tap to Move (CinderTap)",
-"UniqueID": "User.CinderJoystick",
-"EntryDll": "CinderJoystick.dll",
+"Description": "Seamlessly integrates Stardew Valley Android's native MobileAtlas Virtual Joypad with CinderTap (Tap to Move)",
+"UniqueID": "User.CinderJoyTap",
+"EntryDll": "CinderJoyTap.dll",
 "MinimumApiVersion": "4.5.2",
 "Dependencies": [
 {
