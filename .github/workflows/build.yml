@@ -1,33 +1,26 @@
-name: Build CinderJoystick Mod
-
-on:
-  push:
-    branches: [ "main", "master" ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '6.0.x'
-
-      - name: Download Stardew Valley Reference Assemblies
-        run: mkdir -p $HOME/stardew_refs && curl -sL https://github.com/Pathoschild/StardewValley-ReferenceAssemblies/archive/refs/heads/main.tar.gz | tar -xz -C $HOME/stardew_refs --strip-components=1
-
-      - name: Build Mod (Release)
-        run: dotnet build -c Release -p:GamePath="$HOME/stardew_refs"
-
-      - name: Upload Mod Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CinderJoystick-Release
-          path: |
-            **/bin/Release/net6.0/CinderJoystick.dll
-            **/manifest.json
+name: Build CinderJoyTap Mod
+​on:
+push:
+branches: [ "main", "master" ]
+workflow_dispatch:
+​jobs:
+build:
+runs-on: ubuntu-latest
+​steps:
+- name: Checkout Code
+uses: actions/checkout@v4
+​- name: Setup .NET SDK
+uses: actions/setup-dotnet@v4
+with:
+dotnet-version: '6.0.x'
+​- name: Download Stardew Valley Reference Assemblies
+run: mkdir -p HOME/stardew_refs && curl -sL https://github.com/Pathoschild/StardewValley-ReferenceAssemblies/archive/refs/heads/main.tar.gz \vert{} tar -xz -CHOME/stardew_refs --strip-components=1
+​- name: Build Mod (Release)
+run: dotnet build -c Release -p:GamePath="$HOME/stardew_refs"
+​- name: Upload Mod Artifact
+uses: actions/upload-artifact@v4
+with:
+name: CinderJoyTap-Release
+path: |
+**/bin/Release/net6.0/CinderJoyTap.dll
+**/manifest.json
