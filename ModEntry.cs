@@ -1,26 +1,13 @@
 using System;
-using System.Collections.Generic;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input.Touch;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
-using StardewValley.BellsAndWhistles;
 using StardewValley.Menus;
 
-namespace CinderJoyTap
+namespace CinderJoystick
 {
-    public interface IGenericModConfigMenuApi
-    {
-        void Register(IManifest mod, Action reset, Action save, bool titleScreenOnly = false);
-        void AddSectionTitle(IManifest mod, Func<string> text, Func<string> tooltip = null!);
-        void AddBoolOption(IManifest mod, Func<bool> getValue, Action<bool> setValue, Func<string> name, Func<string> tooltip = null!, string fieldId = null!);
-        void AddNumberOption(IManifest mod, Func<float> getValue, Action<float> setValue, Func<string> name, Func<string> tooltip = null!, float? min = null, float? max = null, float? interval = null, Func<float, string> formatValue = null!, string fieldId = null!);
-        void AddTextOption(IManifest mod, Func<string> getValue, Action<string> setValue, Func<string> name, Func<string> tooltip = null!, string[] allowedValues = null!, Func<string, string> formatAllowedValue = null!, string fieldId = null!);
-    }
-
     public class ModEntry : Mod
     {
         public static ModConfig Config { get; private set; } = new ModConfig();
@@ -28,24 +15,6 @@ namespace CinderJoyTap
         public static IMonitor ModMonitor { get; private set; } = null!;
 
         public const int CONTROL_STYLE_CUSTOM_ID = 987654;
-        public const int ADJUST_JOYSTICK_CUSTOM_ID = 987655;
-
-        private Vector2 joystickCenter;
-        private Vector2 knobPosition;
-        private bool isDragging = false;
-        private int activeTouchId = -1;
-        private Vector2 inputVector = Vector2.Zero;
-
-        private Texture2D? circleTexture;
-
-        // --- MODE ADJUSTMENT ---
-        private static bool isAdjusting = false;
-        private bool isDraggingInAdjust = false;
-        private Rectangle saveButtonRect;
-        private Rectangle sizePlusRect;
-        private Rectangle sizeMinusRect;
-        private Rectangle opacityPlusRect;
-        private Rectangle opacityMinusRect;
 
         public override void Entry(IModHelper helper)
         {
@@ -55,6 +24,7 @@ namespace CinderJoyTap
 
             var harmony = new Harmony(ModManifest.UniqueID);
 
+            // Harmony Patches untuk menyuntikkan skema kontrol Hybrid ke menu Options bawaan game
             harmony.Patch(
                 original: AccessTools.Constructor(typeof(OptionsPage), new[] { typeof(int), typeof(int), typeof(int), typeof(int) }),
                 postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionsPageConstructorPostfix))
@@ -67,72 +37,14 @@ namespace CinderJoyTap
 
             helper.Events.GameLoop.GameLaunched += OnGameLaunched;
             helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
-            helper.Events.Display.RenderedHud += OnRenderedHud;
-            helper.Events.Display.WindowResized += OnWindowResized;
-
-            RecalculatePosition();
         }
 
         private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
         {
-            circleTexture = CreateCircleTexture(128);
-            RecalculatePosition();
-            SetupGMCM();
+            ModMonitor.Log("CinderJoystick berhasil dimuat. Mengintegrasikan Virtual Joypad Native.", LogLevel.Info);
         }
 
-        private void SetupGMCM()
-        {
-            var configMenu = Helper.ModRegistry.GetApi<IGenericModConfigMenuApi>("spacechase0.GenericModConfigMenu");
-            if (configMenu == null) return;
-
-            configMenu.Register(
-                mod: ModManifest,
-                reset: () => { Config = new ModConfig(); RecalculatePosition(); },
-                save: () => { Helper.WriteConfig(Config); RecalculatePosition(); }
-            );
-
-            configMenu.AddSectionTitle(ModManifest, () => "Pengaturan Joystick In-Game");
-
-            configMenu.AddBoolOption(
-                mod: ModManifest,
-                getValue: () => Config.Enabled,
-                setValue: value => Config.Enabled = value,
-                name: () => "Aktifkan Mod",
-                tooltip: () => "Nyalakan atau matikan virtual joystick."
-            );
-
-            configMenu.AddTextOption(
-                mod: ModManifest,
-                getValue: () => Config.Mode.ToString(),
-                setValue: value => {
-                    if (Enum.TryParse<ControlMode>(value, out var mode))
-                        Config.Mode = mode;
-                },
-                name: () => "Mode Kontrol",
-                allowedValues: new[] { "JoypadOnly", "TapToMove", "Hybrid" },
-                formatAllowedValue: value => value switch
-                {
-                    "JoypadOnly" => "Joypad",
-                    "TapToMove" => "Tap to Move",
-                    "Hybrid" => "Joypad + Tap to Move",
-                    _ => value
-                }
-            );
-        }
-
-        private void OnWindowResized(object? sender, WindowResizedEventArgs e)
-        {
-            RecalculatePosition();
-        }
-
-        private void RecalculatePosition()
-        {
-            float screenHeight = Game1.uiViewport.Height;
-            joystickCenter = new Vector2(Config.OffsetX, screenHeight - Config.OffsetY);
-            knobPosition = joystickCenter;
-        }
-
-        // --- HARMONY PATCHES ---
+        // --- HARMONY PATCHES UNTUK MENU OPTIONS NATIVE GAME --- //
 
         public static void OnOptionsPageConstructorPostfix(OptionsPage __instance)
         {
@@ -142,7 +54,7 @@ namespace CinderJoyTap
 
                 foreach (var element in __instance.options)
                 {
-                    if (element is OptionsDropDown dropDown &&
+                    if (element is OptionsDropDown dropDown && 
                        (element.label?.Equals("Control Style", StringComparison.OrdinalIgnoreCase) == true || element.whichOption == 52))
                     {
                         controlStyleDropDown = dropDown;
@@ -173,29 +85,6 @@ namespace CinderJoyTap
                         _ => 2
                     };
                 }
-
-                bool hasAdjustBtn = false;
-                foreach (var element in __instance.options)
-                {
-                    if (element.whichOption == ADJUST_JOYSTICK_CUSTOM_ID || element.label?.Equals("Adjust Joypad", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        element.whichOption = ADJUST_JOYSTICK_CUSTOM_ID;
-                        hasAdjustBtn = true;
-                        break;
-                    }
-                }
-
-                if (!hasAdjustBtn)
-                {
-                    var adjustButton = new OptionsButton("Adjust Joypad", () =>
-                    {
-                        isAdjusting = true;
-                        Game1.activeClickableMenu = null;
-                        ModMonitor.Log("Masuk ke Mode Adjust Joypad.", LogLevel.Info);
-                    });
-                    adjustButton.whichOption = ADJUST_JOYSTICK_CUSTOM_ID;
-                    __instance.options.Add(adjustButton);
-                }
             }
             catch (Exception ex)
             {
@@ -223,334 +112,71 @@ namespace CinderJoyTap
                         {
                             Config.Mode = selectedMode;
                             ModHelper.WriteConfig(Config);
+                            ApplyNativeControlState();
                             ModMonitor.Log($"Skema Kontrol diubah ke: {Config.Mode}", LogLevel.Info);
                         }
-                    }
-                    else if (element.whichOption == ADJUST_JOYSTICK_CUSTOM_ID && element.bounds.Contains(x, y))
-                    {
-                        isAdjusting = true;
-                        Game1.activeClickableMenu = null;
-                        ModMonitor.Log("Masuk ke Mode Adjust Joypad.", LogLevel.Info);
                     }
                 }
             }
             catch (Exception ex)
             {
-                ModMonitor.Log($"Gagal memproses klik Options: {ex.Message}", LogLevel.Error);
+                ModMonitor.Log($"Gagal memproses pilihan menu Options: {ex.Message}", LogLevel.Error);
             }
         }
 
-        // --- UPDATE & INPUT HANDLING ---
+        // --- PENGELOLAAN MANAJEMEN KONTROL NATIVE GAME --- //
 
         private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
         {
-            if (isAdjusting)
-            {
-                HandleAdjustModeInput();
-                return;
-            }
+            if (!Config.Enabled || !Context.IsWorldReady) return;
 
-            if (!Config.Enabled || !Context.IsWorldReady || Game1.activeClickableMenu != null || Game1.eventUp || Game1.dialogueUp)
-            {
-                if (isDragging) ResetJoystick();
-                return;
-            }
-
-            if (Config.Mode == ControlMode.JoypadOnly && Game1.player.controller != null)
-            {
-                Game1.player.controller = null;
-            }
-
-            if (Config.Mode == ControlMode.TapToMove)
-            {
-                if (isDragging) ResetJoystick();
-                return;
-            }
-
-            HandleTouchInput();
-            ApplyPlayerMovement();
+            // Setiap tick, pastikan status Virtual Joypad native game disinkronkan
+            EnsureNativeJoypadState();
         }
 
-        private void HandleAdjustModeInput()
+        private static void ApplyNativeControlState()
         {
-            TouchCollection touchCollection = TouchPanel.GetState();
-            float uiScale = Game1.options.uiScale;
+            if (!Context.IsWorldReady) return;
 
-            foreach (TouchLocation touch in touchCollection)
+            switch (Config.Mode)
             {
-                Vector2 touchPos = touch.Position / uiScale;
-                Point pt = new Point((int)touchPos.X, (int)touchPos.Y);
-
-                if (touch.State == TouchLocationState.Pressed)
-                {
-                    if (saveButtonRect.Contains(pt))
-                    {
-                        SaveAndExitAdjustment();
-                        return;
-                    }
-
-                    if (sizePlusRect.Contains(pt))
-                    {
-                        Config.BaseRadius = Math.Min(250f, Config.BaseRadius + 10f);
-                        Config.KnobRadius = Config.BaseRadius * 0.4f;
-                        return;
-                    }
-                    if (sizeMinusRect.Contains(pt))
-                    {
-                        Config.BaseRadius = Math.Max(50f, Config.BaseRadius - 10f);
-                        Config.KnobRadius = Config.BaseRadius * 0.4f;
-                        return;
-                    }
-
-                    if (opacityPlusRect.Contains(pt))
-                    {
-                        Config.Opacity = Math.Min(1.0f, Config.Opacity + 0.1f);
-                        return;
-                    }
-                    if (opacityMinusRect.Contains(pt))
-                    {
-                        Config.Opacity = Math.Max(0.1f, Config.Opacity - 0.1f);
-                        return;
-                    }
-
-                    if (Vector2.Distance(touchPos, joystickCenter) <= Config.BaseRadius * 1.5f)
-                    {
-                        isDraggingInAdjust = true;
-                    }
-                }
-                else if (touch.State == TouchLocationState.Moved && isDraggingInAdjust)
-                {
-                    joystickCenter = touchPos;
-                    knobPosition = joystickCenter;
-
-                    Config.OffsetX = joystickCenter.X;
-                    Config.OffsetY = Game1.uiViewport.Height - joystickCenter.Y;
-                }
-                else if (touch.State == TouchLocationState.Released)
-                {
-                    isDraggingInAdjust = false;
-                }
-            }
-        }
-
-        private void SaveAndExitAdjustment()
-        {
-            isAdjusting = false;
-            isDraggingInAdjust = false;
-            ModHelper.WriteConfig(Config);
-            RecalculatePosition();
-            Game1.addHUDMessage(new HUDMessage("Pengaturan Joystick Disimpan!"));
-        }
-
-        private void HandleTouchInput()
-        {
-            TouchCollection touchCollection = TouchPanel.GetState();
-            bool foundActiveTouch = false;
-
-            float uiScale = Game1.options.uiScale;
-
-            foreach (TouchLocation touch in touchCollection)
-            {
-                Vector2 touchPos = touch.Position / uiScale;
-
-                if (touch.State == TouchLocationState.Pressed)
-                {
-                    if (Vector2.Distance(touchPos, joystickCenter) <= Config.BaseRadius * 1.2f)
-                    {
-                        isDragging = true;
-                        activeTouchId = touch.Id;
-                        foundActiveTouch = true;
-                        UpdateKnobPosition(touchPos);
-                        break;
-                    }
-                }
-                else if (touch.State == TouchLocationState.Moved && touch.Id == activeTouchId)
-                {
-                    foundActiveTouch = true;
-                    UpdateKnobPosition(touchPos);
+                case ControlMode.JoypadOnly:
+                    // Aktifkan Joypad Native Bawaan Game (Joypad & Buttons)
+                    Game1.options.controlStyle = 0;
                     break;
-                }
-                else if (touch.State == TouchLocationState.Released && touch.Id == activeTouchId)
-                {
-                    ResetJoystick();
-                    return;
-                }
-            }
 
-            if (isDragging && !foundActiveTouch)
-            {
-                ResetJoystick();
-            }
-        }
+                case ControlMode.TapToMove:
+                    // Aktifkan Tap to Move Native Bawaan Game
+                    Game1.options.controlStyle = 1;
+                    break;
 
-        private void UpdateKnobPosition(Vector2 touchPos)
-        {
-            Vector2 offset = touchPos - joystickCenter;
-            float distance = offset.Length();
-
-            if (distance > Config.BaseRadius)
-            {
-                offset = Vector2.Normalize(offset) * Config.BaseRadius;
-            }
-
-            knobPosition = joystickCenter + offset;
-
-            float normalizedDistance = offset.Length() / Config.BaseRadius;
-            if (normalizedDistance < Config.Deadzone)
-            {
-                inputVector = Vector2.Zero;
-            }
-            else
-            {
-                inputVector = Vector2.Normalize(offset) * ((normalizedDistance - Config.Deadzone) / (1f - Config.Deadzone));
-            }
-
-            if (Config.OverrideCinderTap && inputVector != Vector2.Zero && Game1.player.controller != null)
-            {
-                Game1.player.controller = null;
+                case ControlMode.Hybrid:
+                    // Paksa game mengaktifkan Joypad Native (Joystick + Action/Tool Buttons)
+                    // sambil tetap mengizinkan sistem Tap-To-Move/CinderTap membaca input layar
+                    Game1.options.controlStyle = 2; // "Joypad + Tap to Move" mode di engine Android
+                    break;
             }
         }
 
-        private void ApplyPlayerMovement()
+        private void EnsureNativeJoypadState()
         {
-            if (inputVector == Vector2.Zero || Game1.player == null) return;
-
-            float speed = Game1.player.getMovementSpeed();
-            Vector2 velocity = inputVector * speed;
-
-            Game1.player.Halt();
-
-            if (Math.Abs(inputVector.X) > Math.Abs(inputVector.Y))
+            if (Config.Mode == ControlMode.Hybrid)
             {
-                if (inputVector.X > 0)
+                // Memastikan tombol Action & Tool serta Joystick Native tetap muncul di layar
+                if (Game1.options.controlStyle != 2)
                 {
-                    Game1.player.SetMovingRight(true);
-                    Game1.player.FacingDirection = Game1.right;
+                    Game1.options.controlStyle = 2;
                 }
-                else
+
+                // Jika pemain sedang menggerakkan analog Joypad native, hentikan auto-walk pathfinding CinderTap
+                if (Game1.player != null && (Game1.player.isMoving() || Game1.oldPadState.IsButtonDown(Microsoft.Xna.Framework.Input.Buttons.DPadUp)))
                 {
-                    Game1.player.SetMovingLeft(true);
-                    Game1.player.FacingDirection = Game1.left;
+                    if (Game1.player.controller != null)
+                    {
+                        Game1.player.controller = null;
+                    }
                 }
             }
-            else
-            {
-                if (inputVector.Y > 0)
-                {
-                    Game1.player.SetMovingDown(true);
-                    Game1.player.FacingDirection = Game1.down;
-                }
-                else
-                {
-                    Game1.player.SetMovingUp(true);
-                    Game1.player.FacingDirection = Game1.up;
-                }
-            }
-
-            Game1.player.Position += velocity;
-        }
-
-        private void ResetJoystick()
-        {
-            isDragging = false;
-            activeTouchId = -1;
-            knobPosition = joystickCenter;
-            inputVector = Vector2.Zero;
-        }
-
-        private void OnRenderedHud(object? sender, RenderedHudEventArgs e)
-        {
-            if (!Config.Enabled || circleTexture == null) return;
-
-            SpriteBatch spriteBatch = e.SpriteBatch;
-
-            if (isAdjusting)
-            {
-                spriteBatch.Draw(Game1.fadeToBlackRect, Game1.graphics.GraphicsDevice.Viewport.Bounds, Color.Black * 0.45f);
-
-                Rectangle baseRectPreview = new Rectangle(
-                    (int)(joystickCenter.X - Config.BaseRadius),
-                    (int)(joystickCenter.Y - Config.BaseRadius),
-                    (int)(Config.BaseRadius * 2),
-                    (int)(Config.BaseRadius * 2)
-                );
-                spriteBatch.Draw(circleTexture, baseRectPreview, Color.Yellow * 0.6f);
-
-                Rectangle knobRectPreview = new Rectangle(
-                    (int)(knobPosition.X - Config.KnobRadius),
-                    (int)(knobPosition.Y - Config.KnobRadius),
-                    (int)(Config.KnobRadius * 2),
-                    (int)(Config.KnobRadius * 2)
-                );
-                spriteBatch.Draw(circleTexture, knobRectPreview, Color.White * 0.9f);
-
-                int screenW = Game1.uiViewport.Width;
-
-                saveButtonRect = new Rectangle(screenW - 180, 20, 150, 60);
-                IClickableMenu.drawTextureBox(spriteBatch, saveButtonRect.X, saveButtonRect.Y, saveButtonRect.Width, saveButtonRect.Height, Color.White);
-                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "OK / Save", saveButtonRect.Center.X, saveButtonRect.Center.Y - 12);
-
-                sizeMinusRect = new Rectangle(20, 20, 60, 60);
-                sizePlusRect = new Rectangle(90, 20, 60, 60);
-                IClickableMenu.drawTextureBox(spriteBatch, sizeMinusRect.X, sizeMinusRect.Y, sizeMinusRect.Width, sizeMinusRect.Height, Color.White);
-                IClickableMenu.drawTextureBox(spriteBatch, sizePlusRect.X, sizePlusRect.Y, sizePlusRect.Width, sizePlusRect.Height, Color.White);
-                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "-", sizeMinusRect.Center.X, sizeMinusRect.Center.Y - 12);
-                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "+", sizePlusRect.Center.X, sizePlusRect.Center.Y - 12);
-
-                opacityMinusRect = new Rectangle(180, 20, 60, 60);
-                opacityPlusRect = new Rectangle(250, 20, 60, 60);
-                IClickableMenu.drawTextureBox(spriteBatch, opacityMinusRect.X, opacityMinusRect.Y, opacityMinusRect.Width, opacityMinusRect.Height, Color.White);
-                IClickableMenu.drawTextureBox(spriteBatch, opacityPlusRect.X, opacityPlusRect.Y, opacityPlusRect.Width, opacityPlusRect.Height, Color.White);
-                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "O-", opacityMinusRect.Center.X, opacityMinusRect.Center.Y - 12);
-                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "O+", opacityPlusRect.Center.X, opacityPlusRect.Center.Y - 12);
-
-                return;
-            }
-
-            if (Config.Mode == ControlMode.TapToMove || !Context.IsWorldReady || Game1.activeClickableMenu != null || Game1.eventUp)
-                return;
-
-            Rectangle baseRect = new Rectangle(
-                (int)(joystickCenter.X - Config.BaseRadius),
-                (int)(joystickCenter.Y - Config.BaseRadius),
-                (int)(Config.BaseRadius * 2),
-                (int)(Config.BaseRadius * 2)
-            );
-            spriteBatch.Draw(circleTexture, baseRect, Color.White * Config.Opacity);
-
-            Rectangle knobRect = new Rectangle(
-                (int)(knobPosition.X - Config.KnobRadius),
-                (int)(knobPosition.Y - Config.KnobRadius),
-                (int)(Config.KnobRadius * 2),
-                (int)(Config.KnobRadius * 2)
-            );
-            spriteBatch.Draw(circleTexture, knobRect, Color.White * (Config.Opacity + 0.35f));
-        }
-
-        private Texture2D CreateCircleTexture(int diameter)
-        {
-            Texture2D texture = new Texture2D(Game1.graphics.GraphicsDevice, diameter, diameter);
-            Color[] colorData = new Color[diameter * diameter];
-
-            float radius = diameter / 2f;
-            float radiusSq = radius * radius;
-
-            for (int x = 0; x < diameter; x++)
-            {
-                for (int y = 0; y < diameter; y++)
-                {
-                    int index = x + y * diameter;
-                    Vector2 pos = new Vector2(x - radius, y - radius);
-
-                    if (pos.LengthSquared() <= radiusSq)
-                        colorData[index] = Color.White;
-                    else
-                        colorData[index] = Color.Transparent;
-                }
-            }
-
-            texture.SetData(colorData);
-            return texture;
         }
     }
 }
