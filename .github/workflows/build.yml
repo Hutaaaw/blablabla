@@ -13,87 +13,14 @@ uses: actions/checkout@v4
 uses: actions/setup-dotnet@v4
 with:
 dotnet-version: '6.0.x'
-​- name: Add NuGet source for Pathoschild packages
-run: |
-dotnet nuget add source https://nuget.pkg.github.com/Pathoschild/index.json -n "Pathoschild" -u "name: Build CinderJoyTap Mod
-​on:
-push:
-branches: [ "main", "master" ]
-workflow_dispatch:
-​jobs:
-build:
-runs-on: ubuntu-latest
-​steps:
-- name: Checkout Code
-uses: actions/checkout@v4
-​- name: Setup .NET SDK
-uses: actions/setup-dotnet@v4
-with:
-dotnet-version: '6.0.x'
 ​- name: Download Stardew Reference Assemblies
-run: |
-mkdir -p $HOME/stardew_refs
-curl -fL "https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz" -o /tmp/sdv_refs.tar.gz || curl -fL "https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/master.tar.gz" -o /tmp/sdv_refs.tar.gz
-tar -xzf /tmp/sdv_refs.tar.gz -C $HOME/stardew_refs --strip-components=1
-​- name: Restore dependencies
-run: dotnet restore CinderJoyTap.csproj
+run: mkdir -p $HOME/stardew_refs && curl -fL "https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz" -o /tmp/sdv_refs.tar.gz && tar -xzf /tmp/sdv_refs.tar.gz -C $HOME/stardew_refs --strip-components=1
 ​- name: Build Mod
 run: dotnet build CinderJoyTap.csproj -c Release -p:GamePath="$HOME/stardew_refs"
+​- name: Prepare Staging Folder
+run: mkdir -p publish && cp bin/Release/net6.0/CinderJoyTap.dll manifest.json publish/
 ​- name: Upload Mod Artifact
 uses: actions/upload-artifact@v4
 with:
 name: CinderJoyTap-Release
-path: |
-bin/Release/net6.0/CinderJoyTap.dll
-manifest.json" -p "${{ secrets.GITHUB_TOKEN }}" --store-password-in-clear-text
-continue-on-error: true
-​- name: Restore NuGet cache
-uses: actions/cache@v4
-with:
-path: |
-~/.nuget/packages
-~/.local/share/NuGet
-key: {{ runner.os }}-nuget-{{ hashFiles('**/*.csproj') }}
-restore-keys: |
-${{ runner.os }}-nuget-
-​- name: Download Stardew Valley Reference Assemblies
-run: |
-set -euo pipefail
-mkdir -p "$HOME/stardew_refs"
-URL_BASE="https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads"
-TEMP_ARCHIVE="/tmp/sdv_refs.tar.gz"
-SUCCESS=0
-​for BR in main master; do
-echo "Trying branch: $BR"
-if curl -fL "$URL_BASE/$BR.tar.gz" -o "$TEMP_ARCHIVE"; then
-echo "Downloaded archive for $BR, extracting..."
-tar -xz -f "$TEMP_ARCHIVE" -C "$HOME/stardew_refs" --strip-components=1 && SUCCESS=1 && break
-else
-echo "Download for $BR failed (HTTP error)."
-fi
-done
-​if [ "$SUCCESS" -ne 1 ]; then
-echo "ERROR: failed to download Stardew Valley reference assemblies."
-echo "Please verify repository URL: https://github.com/StardewModders/mod-reference-assemblies"
-exit 1
-fi
-​echo "Contents of $HOME/stardew_refs (top-level):"
-ls -la "$HOME/stardew_refs" || true
-​- name: Restore .NET dependencies
-run: dotnet restore
-​- name: Build Mod (Release)
-run: dotnet build -c Release -p:GamePath="$HOME/stardew_refs"
-​- name: Verify build output
-run: |
-set -e
-echo "Searching for output DLL..."
-find . -type f -path "/bin/Release/net6.0/.dll" -maxdepth 8 || true
-echo "Listing expected files (if present):"
-ls -la **/bin/Release/net6.0 || true
-​- name: Upload Mod Artifact
-uses: actions/upload-artifact@v4
-with:
-name: CinderJoyTap-Release
-path: |
-**/bin/Release/net6.0/CinderJoyTap.dll
-**/manifest.json
+path: publish/
