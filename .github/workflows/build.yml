@@ -14,8 +14,26 @@ jobs:
         curl -fL "https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz" -o /tmp/sdv_refs.tar.gz
         tar -xzf /tmp/sdv_refs.tar.gz -C $HOME/stardew_refs --strip-components=1
 
+    - name: Auto-Fix Csproj
+      run: |
+        cat << 'EOF' > CinderJoyTap.csproj
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net6.0</TargetFramework>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+            <AssemblyName>CinderJoyTap</AssemblyName>
+            <RootNamespace>CinderJoyTap</RootNamespace>
+            <EnableHarmony>true</EnableHarmony>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.1.1" />
+          </ItemGroup>
+        </Project>
+        EOF
+
     - name: Build Mod
-      run: dotnet build -c Release -p:GamePath="$HOME/stardew_refs"
+      run: dotnet build CinderJoyTap.csproj -c Release -p:GamePath="$HOME/stardew_refs"
 
     - name: Prepare Staging
       run: |
