@@ -1,10 +1,10 @@
 {
-"Name": "CinderJoystick",
-"Author": "AlbertBooz",
+"Name": "CinderJoyTap",
+"Author": "User",
 "Version": "1.1.0",
 "Description": "Virtual Joypad extension for Cinderbox Android integrated into native Control Style options menu",
-"UniqueID": "AlbertBooz.CinderJoystick",
-"EntryDll": "CinderJoystick.dll",
+"UniqueID": "User.CinderJoyTap",
+"EntryDll": "CinderJoyTap.dll",
 "MinimumApiVersion": "4.5.2",
 "Dependencies": [
 {
