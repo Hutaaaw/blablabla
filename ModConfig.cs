@@ -1,10 +1,10 @@
-namespace CinderJoystick
+namespace CinderJoyTap
 {
     public enum ControlMode
     {
-        JoypadOnly,      // Joypad Bawaan Game
-        TapToMove,       // Tap to Move / CinderTap
-        Hybrid           // Joypad Native + Tap to Move (CinderJoy)
+        JoypadOnly = 0,   // Hanya Virtual Joypad
+        TapToMove = 1,    // Hanya Tap to Move / CinderTap
+        Hybrid = 2        // MobileAtlas Native Joypad + CinderTap
     }
 
     public class ModConfig
