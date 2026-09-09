@@ -16,14 +16,60 @@ jobs:
         with:
           dotnet-version: '6.0.x'
 
+      - name: Restore NuGet cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nuget/packages
+            ~/.local/share/NuGet
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
       - name: Download Stardew Valley Reference Assemblies
         run: |
-          mkdir -p $HOME/stardew_refs
-          # -f makes curl fail on HTTP errors (so we don't pipe HTML into tar)
-          curl -fL https://github.com/Pathoschild/StardewValley-ReferenceAssemblies/archive/refs/heads/main.tar.gz | tar -xz -C $HOME/stardew_refs --strip-components=1
+          set -euo pipefail
+          mkdir -p "$HOME/stardew_refs"
+          URL_BASE="https://github.com/Pathoschild/StardewValley-ReferenceAssemblies/archive/refs/heads"
+          TEMP_ARCHIVE="/tmp/sdv_refs.tar.gz"
+          SUCCESS=0
+
+          for BR in main master; do
+            echo "Trying branch: $BR"
+            if curl -fL "$URL_BASE/$BR.tar.gz" -o "$TEMP_ARCHIVE"; then
+              echo "Downloaded archive for $BR, extracting..."
+              tar -xz -f "$TEMP_ARCHIVE" -C "$HOME/stardew_refs" --strip-components=1 && SUCCESS=1 && break
+            else
+              echo "Download for $BR failed (HTTP error)."
+            fi
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo
+            echo "ERROR: failed to download StardewValley reference assemblies from Pathoschild repo."
+            echo "Please verify the repository exists and the branch is correct:"
+            echo "  https://github.com/Pathoschild/StardewValley-ReferenceAssemblies"
+            echo
+            # Optional: try an alternative URL here if you have it
+            exit 1
+          fi
+
+          echo "Contents of $HOME/stardew_refs (top-level):"
+          ls -la "$HOME/stardew_refs" || true
+
+      - name: Restore .NET dependencies
+        run: dotnet restore
 
       - name: Build Mod (Release)
         run: dotnet build -c Release -p:GamePath="$HOME/stardew_refs"
+
+      - name: Verify build output
+        run: |
+          set -e
+          echo "Searching for output DLL..."
+          find . -type f -path "*/bin/Release/net6.0/*.dll" -maxdepth 6 || true
+          echo "Listing expected files:"
+          ls -la **/bin/Release/net6.0 || true
 
       - name: Upload Mod Artifact
         uses: actions/upload-artifact@v4
