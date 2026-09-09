@@ -39,7 +39,6 @@ namespace CinderJoyTap
                     catch { }
                 }
 
-                // Menggunakan Reflection string agar tidak terjadi error CS0117 saat dikompilasi di PC/GitHub Actions
                 var optionValueChangeMethod = AccessTools.Method(typeof(OptionsPage), "optionValueChange");
                 if (optionValueChangeMethod != null)
                 {
@@ -69,6 +68,22 @@ namespace CinderJoyTap
         }
 
         private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
+        {
+            ModMonitor.Log("CinderJoyTap berhasil dimuat.", LogLevel.Info);
+            RegisterGenericModConfigMenu();
+        }
+
+        private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e)
+        {
+            ApplyNativeControlState();
+        }
+
+        private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
+        {
+            if (!Config.Enabled || !Context.IsWorldReady) return;
+            EnsureHybridControls();
+        }
+
         public static void SetNativeControlStyle(int value)
         {
             try
@@ -109,6 +124,48 @@ namespace CinderJoyTap
             }
             catch { }
             return 0;
+        }
+
+        public static void OnOptionsPageConstructorPostfix(OptionsPage __instance)
+        {
+            try
+            {
+                if (__instance?.options == null) return;
+
+                bool customOptionExists = false;
+                foreach (var element in __instance.options)
+                {
+                    if (element != null && element.whichOption == CONTROL_STYLE_CUSTOM_ID)
+                    {
+                        customOptionExists = true;
+                        break;
+                    }
+                }
+
+                if (!customOptionExists)
+                {
+                    var dropDown = new OptionsDropDown("CinderJoy Control Scheme", CONTROL_STYLE_CUSTOM_ID);
+                    dropDown.dropDownOptions.Add("JoypadOnly");
+                    dropDown.dropDownDisplayOptions.Add("Joypad Only");
+
+                    dropDown.dropDownOptions.Add("TapToMove");
+                    dropDown.dropDownDisplayOptions.Add("Tap to Move");
+
+                    dropDown.dropDownOptions.Add("Hybrid");
+                    dropDown.dropDownDisplayOptions.Add("Hybrid (Joypad + Tap)");
+
+                    dropDown.selectedOption = Config.Mode switch
+                    {
+                        ControlMode.JoypadOnly => 0,
+                        ControlMode.TapToMove => 1,
+                        ControlMode.Hybrid => 2,
+                        _ => 2
+                    };
+
+                    __instance.options.Add(dropDown);
+                }
+            }
+            catch { }
         }
 
         public static void OnReceiveLeftClickPostfix(OptionsPage __instance)
@@ -189,16 +246,19 @@ namespace CinderJoyTap
 
         private void EnsureHybridControls()
         {
-            if (GetNativeControlStyle() != 2)
+            if (Config.Mode == ControlMode.Hybrid)
             {
-                SetNativeControlStyle(2);
-            }
-
-            if (Game1.player != null && (Game1.player.isMoving() || Game1.oldPadState.IsButtonDown(Microsoft.Xna.Framework.Input.Buttons.DPadUp)))
-            {
-                if (Game1.player.controller != null)
+                if (GetNativeControlStyle() != 2)
                 {
-                    Game1.player.controller = null;
+                    SetNativeControlStyle(2);
+                }
+
+                if (Game1.player != null && (Game1.player.isMoving() || Game1.oldPadState.IsButtonDown(Microsoft.Xna.Framework.Input.Buttons.DPadUp)))
+                {
+                    if (Game1.player.controller != null)
+                    {
+                        Game1.player.controller = null;
+                    }
                 }
             }
         }
