@@ -1,31 +1,29 @@
-name: Build CinderJoyTap Mod
-​on:
-push:
-branches: [ "main", "master" ]
-workflow_dispatch:
-​jobs:
-build:
-runs-on: ubuntu-latest
-​steps:
-- name: Checkout Code
-uses: actions/checkout@v4
-​- name: Setup .NET SDK
-uses: actions/setup-dotnet@v4
-with:
-dotnet-version: '6.0.x'
-​- name: Download Stardew Reference Assemblies
-run: |
-mkdir -p $HOME/stardew_refs
-curl -fL "https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz" -o /tmp/sdv_refs.tar.gz
-tar -xzf /tmp/sdv_refs.tar.gz -C $HOME/stardew_refs --strip-components=1
-​- name: Build Mod
-run: dotnet build CinderJoyTap.csproj -c Release -p:GamePath="$HOME/stardew_refs"
-​- name: Prepare Staging Folder
-run: |
-mkdir -p publish
-cp bin/Release/net6.0/CinderJoyTap.dll manifest.json publish/
-​- name: Upload Mod Artifact
-uses: actions/upload-artifact@v4
-with:
-name: CinderJoyTap-Release
-path: publish/
+Name: Build CinderJoyTap Mod
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download References
+      run: |
+        mkdir -p $HOME/stardew_refs
+        curl -fL "https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz" -o /tmp/sdv_refs.tar.gz
+        tar -xzf /tmp/sdv_refs.tar.gz -C $HOME/stardew_refs --strip-components=1
+
+    - name: Build Mod
+      run: dotnet build -c Release -p:GamePath="$HOME/stardew_refs"
+
+    - name: Prepare Staging
+      run: |
+        mkdir -p publish
+        cp bin/Release/net6.0/*.dll manifest.json publish/
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: CinderJoyTap-Release
+        path: publish/
+```eof
