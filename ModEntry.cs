@@ -7,7 +7,7 @@ using StardewValley;
 namespace CinderJoyTap
 {
     /// <summary>
-    /// Mod Mediator (Penengah) antara CinderTap (Tap-to-Move) dan Joystick Overlay Cinderbox.
+    /// Mod Mediator (Penengah) antara CinderTap (Tap-to-Move) dan Virtual Joystick Cinderbox.
     /// </summary>
     public class ModEntry : Mod
     {
@@ -27,7 +27,6 @@ namespace CinderJoyTap
         {
             Monitor.Log("CinderJoyTap Bridge (Mod Penengah CinderTap & Joystick) berhasil aktif.", LogLevel.Info);
 
-            // Mengecek apakah CinderTap terdeteksi di daftar mod
             bool hasCinderTap = Helper.ModRegistry.IsLoaded("Eky.CinderTap");
             if (hasCinderTap)
             {
@@ -35,7 +34,7 @@ namespace CinderJoyTap
             }
             else
             {
-                Monitor.Log("CinderTap tidak ditemukan. Mod ini akan tetap memantau input joystick.", LogLevel.Warn);
+                Monitor.Log("CinderTap tidak ditemukan. Mod tetap memantau input joystick.", LogLevel.Warn);
             }
         }
 
@@ -43,15 +42,24 @@ namespace CinderJoyTap
         {
             if (!Config.Enabled || !Context.IsWorldReady || Game1.player == null) return;
 
-            // 1. Cek apakah pemain sedang menggerakkan joystick manual
-            bool isManualMoving = IsJoystickOrKeyActive();
-
-            // 2. LOGIKA PENENGAH: Jika Joystick digerakkan saat CinderTap sedang berjalan (auto-walk)
-            if (isManualMoving && Game1.player.controller != null)
+            // Mode 0: Hanya Joystick -> selalu batalkan pathfinding tap
+            if (Config.Mode == ControlMode.JoypadOnly)
             {
-                // Batalkan auto-walk CinderTap secara instan agar Joystick mengambil alih kendali penuh
-                Game1.player.controller = null;
-                Game1.player.Halt();
+                if (Game1.player.controller != null)
+                {
+                    Game1.player.controller = null;
+                }
+                return;
+            }
+
+            // Mode 2: Hybrid -> Jika pemain menggerakkan Joystick, hentikan auto-walk CinderTap
+            if (Config.Mode == ControlMode.Hybrid)
+            {
+                if (IsJoystickOrKeyActive() && Game1.player.controller != null)
+                {
+                    Game1.player.controller = null;
+                    Game1.player.Halt();
+                }
             }
         }
 
@@ -59,8 +67,7 @@ namespace CinderJoyTap
         {
             if (!Config.Enabled || !Context.IsWorldReady || Game1.player == null) return;
 
-            // Jika tombol fisik / virtual joystick baru saja ditekan, langsung hentikan pathfinding
-            if (IsJoystickOrKeyActive() && Game1.player.controller != null)
+            if (Config.Mode == ControlMode.Hybrid && IsJoystickOrKeyActive() && Game1.player.controller != null)
             {
                 Game1.player.controller = null;
                 Game1.player.Halt();
@@ -71,15 +78,15 @@ namespace CinderJoyTap
         {
             if (!Config.Enabled || !Context.IsWorldReady || Game1.player == null) return;
 
-            // Jika pemain sedang menahan joystick analog, abai ketukan cursor yang tidak disengaja
-            if (IsJoystickOrKeyActive() && Game1.player.controller != null)
+            // Jika pemain sedang menggunakan joystick, abaikan pergerakan kursor/tap
+            if (Config.Mode == ControlMode.Hybrid && IsJoystickOrKeyActive() && Game1.player.controller != null)
             {
                 Game1.player.controller = null;
             }
         }
 
         /// <summary>
-        /// Mendeteksi apakah input manual dari Virtual Joystick Cinderbox (WASD/Gamepad) sedang aktif.
+        /// Mendeteksi apakah input pergerakan manual (WASD / Gamepad Analog) sedang aktif.
         /// </summary>
         private bool IsJoystickOrKeyActive()
         {
@@ -116,15 +123,10 @@ namespace CinderJoyTap
             }
             catch
             {
-                // Menyerap exception jika input buffer belum siap
+                // Menyerap exception jika buffer input belum siap
             }
 
             return false;
         }
-    }
-
-    public class ModConfig
-    {
-        public bool Enabled { get; set; } = true;
     }
 }
