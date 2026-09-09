@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
 using StardewModdingAPI;
@@ -14,6 +15,7 @@ namespace CinderJoyTap
         public static IModHelper ModHelper { get; private set; } = null!;
         public static IMonitor ModMonitor { get; private set; } = null!;
 
+        // ID unik kustom untuk elemen dropdown kontrol di menu Options
         public const int CONTROL_STYLE_CUSTOM_ID = 987654;
 
         public override void Entry(IModHelper helper)
@@ -22,18 +24,40 @@ namespace CinderJoyTap
             ModHelper = helper;
             ModMonitor = Monitor;
 
-            var harmony = new Harmony(ModManifest.UniqueID);
+            try
+            {
+                var harmony = new Harmony(ModManifest.UniqueID);
 
-            // Patch OptionsPage untuk menambahkan opsi Hybrid (Joypad + Tap to Move)
-            harmony.Patch(
-                original: AccessTools.Constructor(typeof(OptionsPage), new[] { typeof(int), typeof(int), typeof(int), typeof(int) }),
-                postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionsPageConstructorPostfix))
-            );
+                // Patch semua constructor OptionsPage agar opsi CinderJoy disuntikkan ke menu Pengaturan
+                foreach (var ctor in typeof(OptionsPage).GetConstructors())
+                {
+                    try
+                    {
+                        harmony.Patch(
+                            original: ctor,
+                            postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionsPageConstructorPostfix))
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        ModMonitor.Log($"Info patch ctor OptionsPage: {ex.Message}", LogLevel.Trace);
+                    }
+                }
 
-            harmony.Patch(
-                original: AccessTools.Method(typeof(OptionsPage), nameof(OptionsPage.receiveLeftClick)),
-                postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionsPageReceiveLeftClickPostfix))
-            );
+                // Patch optionValueChange untuk menangkap interaksi pengubahan nilai dropdown di menu Options
+                var optionValueChangeMethod = AccessTools.Method(typeof(OptionsPage), nameof(OptionsPage.optionValueChange));
+                if (optionValueChangeMethod != null)
+                {
+                    harmony.Patch(
+                        original: optionValueChangeMethod,
+                        postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionValueChangePostfix))
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                ModMonitor.Log($"Peringatan Inisialisasi Harmony: {ex.Message}", LogLevel.Warn);
+            }
 
             helper.Events.GameLoop.GameLaunched += OnGameLaunched;
             helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
@@ -42,7 +66,106 @@ namespace CinderJoyTap
 
         private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
         {
-            ModMonitor.Log("CinderJoyTap siap. Mengintegrasikan Virtual Joypad Native (MobileAtlas) & CinderTap.", LogLevel.Info);
+            RegisterGenericModConfigMenu();
+            ModMonitor.Log("CinderJoyTap v1.3.0 berhasil dimuat. Integrasi Options Menu Native + GMCM Aktif.", LogLevel.Info);
+        }
+
+        public static void OnOptionsPageConstructorPostfix(OptionsPage __instance)
+        {
+            try
+            {
+                if (__instance?.options == null) return;
+
+                // 1. Cek apakah dropdown opsi CinderJoy sudah terpasang
+                bool customOptionExists = false;
+                foreach (var element in __instance.options)
+                {
+                    if (element != null && element.whichOption == CONTROL_STYLE_CUSTOM_ID)
+                    {
+                        customOptionExists = true;
+                        break;
+                    }
+                }
+
+                // 2. Jika belum, tambahkan item OptionsDropDown kustom baru ke dalam menu
+                if (!customOptionExists)
+                {
+                    var dropDown = new OptionsDropDown("CinderJoy Control Scheme", CONTROL_STYLE_CUSTOM_ID);
+                    dropDown.dropDownOptions.Add("JoypadOnly");
+                    dropDown.dropDownDisplayOptions.Add("Joypad Only");
+
+                    dropDown.dropDownOptions.Add("TapToMove");
+                    dropDown.dropDownDisplayOptions.Add("Tap to Move");
+
+                    dropDown.dropDownOptions.Add("Hybrid");
+                    dropDown.dropDownDisplayOptions.Add("Hybrid (Joypad + Tap)");
+
+                    dropDown.selectedOption = Config.Mode switch
+                    {
+                        ControlMode.JoypadOnly => 0,
+                        ControlMode.TapToMove => 1,
+                        ControlMode.Hybrid => 2,
+                        _ => 2
+                    };
+
+                    __instance.options.Add(dropDown);
+                }
+
+                // 3. Modifikasi juga pilihan Control Style native Android jika ditemukan
+                foreach (var element in __instance.options)
+                {
+                    if (element is OptionsDropDown nativeDropDown && 
+                       (element.whichOption == 52 || element.label?.Equals("Control Style", StringComparison.OrdinalIgnoreCase) == true))
+                    {
+                        if (!nativeDropDown.dropDownOptions.Contains("Hybrid"))
+                        {
+                            nativeDropDown.dropDownOptions.Add("Hybrid");
+                            nativeDropDown.dropDownDisplayOptions.Add("Joypad + Tap to Move");
+                        }
+
+                        nativeDropDown.selectedOption = Config.Mode switch
+                        {
+                            ControlMode.JoypadOnly => 0,
+                            ControlMode.TapToMove => 1,
+                            ControlMode.Hybrid => 2,
+                            _ => 2
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModMonitor?.Log($"Gagal menyuntikkan menu Options: {ex.Message}", LogLevel.Trace);
+            }
+        }
+
+        public static void OnOptionValueChangePostfix(int whichOption, int value)
+        {
+            try
+            {
+                if (whichOption == CONTROL_STYLE_CUSTOM_ID || whichOption == 52)
+                {
+                    ControlMode selectedMode = value switch
+                    {
+                        0 => ControlMode.JoypadOnly,
+                        1 => ControlMode.TapToMove,
+                        2 => ControlMode.Hybrid,
+                        _ => ControlMode.Hybrid
+                    };
+
+                    if (Config.Mode != selectedMode)
+                    {
+                        Config.Mode = selectedMode;
+                        ModHelper.WriteConfig(Config);
+                        ApplyNativeControlState();
+                        ModMonitor?.Log($"Skema Kontrol diubah via Options Menu ke: {Config.Mode}", LogLevel.Info);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ModMonitor?.Log($"Gagal memperbarui nilai opsi: {ex.Message}", LogLevel.Trace);
+            }
         }
 
         private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e)
@@ -52,180 +175,95 @@ namespace CinderJoyTap
 
         private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
         {
-            if (!Config.Enabled || !Context.IsWorldReady) return;
+            if (!Config.Enabled || !Context.IsWorldReady || Game1.player == null) return;
 
-            // Pastikan game menggunakan MobileAtlas_tencent & Joypad native
-            EnsureNativeJoypadState();
-        }
-
-        /// <summary>
-        /// Mengatur nilai controlStyle native pada engine Android.
-        /// Nilai 2 = Joypad (MobileAtlas) + Tap to Move (CinderTap)
-        /// </summary>
-        private static void SetNativeControlStyle(int styleValue)
-        {
-            try
+            if (Config.Mode == ControlMode.Hybrid)
             {
-                var prop = AccessTools.Property(typeof(Options), "controlStyle") 
-                        ?? AccessTools.Property(typeof(Options), "ControlStyle");
-                if (prop != null && prop.CanWrite)
-                {
-                    prop.SetValue(Game1.options, styleValue);
-                    return;
-                }
-
-                var field = AccessTools.Field(typeof(Options), "controlStyle") 
-                         ?? AccessTools.Field(typeof(Options), "ControlStyle");
-                if (field != null)
-                {
-                    field.SetValue(Game1.options, styleValue);
-                }
-            }
-            catch (Exception ex)
-            {
-                ModMonitor?.Log($"Gagal mengatur controlStyle: {ex.Message}", LogLevel.Trace);
+                EnsureHybridControls();
             }
         }
 
-        private static int GetNativeControlStyle()
+        public static void ApplyNativeControlState()
         {
-            try
-            {
-                var prop = AccessTools.Property(typeof(Options), "controlStyle") 
-                        ?? AccessTools.Property(typeof(Options), "ControlStyle");
-                if (prop != null)
-                {
-                    return Convert.ToInt32(prop.GetValue(Game1.options));
-                }
-
-                var field = AccessTools.Field(typeof(Options), "controlStyle") 
-                         ?? AccessTools.Field(typeof(Options), "ControlStyle");
-                if (field != null)
-                {
-                    return Convert.ToInt32(field.GetValue(Game1.options));
-                }
-            }
-            catch { }
-            return -1;
-        }
-
-        private static void ApplyNativeControlState()
-        {
-            if (!Context.IsWorldReady || Game1.options == null) return;
+            if (!Context.IsWorldReady) return;
 
             switch (Config.Mode)
             {
                 case ControlMode.JoypadOnly:
-                    SetNativeControlStyle(0);
+                    Game1.options.controlStyle = 0;
                     break;
 
                 case ControlMode.TapToMove:
-                    SetNativeControlStyle(1);
+                    Game1.options.controlStyle = 1;
                     break;
 
                 case ControlMode.Hybrid:
-                    // Style 2 mengaktifkan renderer MobileAtlas_tencent sekaligus pembacaan Tap-to-Move
-                    SetNativeControlStyle(2);
+                    Game1.options.controlStyle = 2;
                     break;
             }
         }
 
-        private void EnsureNativeJoypadState()
+        private void EnsureHybridControls()
         {
-            if (Config.Mode == ControlMode.Hybrid)
+            if (Game1.options.controlStyle != 2)
             {
-                int currentStyle = GetNativeControlStyle();
-                if (currentStyle != -1 && currentStyle != 2)
-                {
-                    SetNativeControlStyle(2);
-                }
+                Game1.options.controlStyle = 2;
+            }
 
-                // SINKRONISASI CINDERTAP & JOYPAD:
-                // Jika pemain menyentuh analog joystick native, langsung hentikan pathfinding auto-walk CinderTap
-                if (Game1.player != null && Game1.player.controller != null && Game1.player.isMoving())
+            // Hentikan auto-walk CinderTap saat tombol DPad/Analog digerakkan
+            if (Game1.player != null && (Game1.player.isMoving() || Game1.oldPadState.IsButtonDown(Microsoft.Xna.Framework.Input.Buttons.DPadUp)))
+            {
+                if (Game1.player.controller != null)
                 {
-                    // Membatalkan auto-walk CinderTap saat analog digerakkan manual
                     Game1.player.controller = null;
                 }
             }
         }
 
-        public static void OnOptionsPageConstructorPostfix(OptionsPage __instance)
+        private void RegisterGenericModConfigMenu()
         {
-            try
-            {
-                OptionsDropDown? controlStyleDropDown = null;
+            var configMenu = ModHelper.ModRegistry.GetApi<IGenericModConfigMenuApi>("spacechase0.GenericModConfigMenu");
+            if (configMenu == null) return;
 
-                foreach (var element in __instance.options)
+            configMenu.Register(
+                mod: ModManifest,
+                reset: () => Config = new ModConfig(),
+                save: () =>
                 {
-                    if (element is OptionsDropDown dropDown && 
-                       (element.label?.Equals("Control Style", StringComparison.OrdinalIgnoreCase) == true || element.whichOption == 52))
+                    ModHelper.WriteConfig(Config);
+                    ApplyNativeControlState();
+                }
+            );
+
+            configMenu.AddBoolOption(
+                mod: ModManifest,
+                getValue: () => Config.Enabled,
+                setValue: value => Config.Enabled = value,
+                name: () => "Aktifkan Mod",
+                tooltip: () => "Aktifkan atau matikan fungsi CinderJoyTap."
+            );
+
+            configMenu.AddTextOption(
+                mod: ModManifest,
+                getValue: () => Config.Mode.ToString(),
+                setValue: value =>
+                {
+                    if (Enum.TryParse<ControlMode>(value, out var parsedMode))
                     {
-                        controlStyleDropDown = dropDown;
-                        break;
+                        Config.Mode = parsedMode;
                     }
-                }
-
-                if (controlStyleDropDown != null)
-                {
-                    controlStyleDropDown.whichOption = CONTROL_STYLE_CUSTOM_ID;
-                    controlStyleDropDown.dropDownOptions.Clear();
-                    controlStyleDropDown.dropDownDisplayOptions.Clear();
-
-                    controlStyleDropDown.dropDownOptions.Add("JoypadOnly");
-                    controlStyleDropDown.dropDownDisplayOptions.Add("Joypad");
-
-                    controlStyleDropDown.dropDownOptions.Add("TapToMove");
-                    controlStyleDropDown.dropDownDisplayOptions.Add("Tap to Move");
-
-                    controlStyleDropDown.dropDownOptions.Add("Hybrid");
-                    controlStyleDropDown.dropDownDisplayOptions.Add("Joypad + Tap to Move (MobileAtlas)");
-
-                    controlStyleDropDown.selectedOption = Config.Mode switch
-                    {
-                        ControlMode.JoypadOnly => 0,
-                        ControlMode.TapToMove => 1,
-                        ControlMode.Hybrid => 2,
-                        _ => 2
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                ModMonitor?.Log($"Gagal menyuntikkan menu Options: {ex.Message}", LogLevel.Error);
-            }
+                },
+                name: () => "Skema Kontrol",
+                tooltip: () => "Pilih mode kontrol: JoypadOnly, TapToMove, atau Hybrid.",
+                allowedValues: new[] { "JoypadOnly", "TapToMove", "Hybrid" }
+            );
         }
+    }
 
-        public static void OnOptionsPageReceiveLeftClickPostfix(OptionsPage __instance, int x, int y)
-        {
-            try
-            {
-                foreach (var element in __instance.options)
-                {
-                    if (element.whichOption == CONTROL_STYLE_CUSTOM_ID && element is OptionsDropDown dropDown)
-                    {
-                        ControlMode selectedMode = dropDown.selectedOption switch
-                        {
-                            0 => ControlMode.JoypadOnly,
-                            1 => ControlMode.TapToMove,
-                            2 => ControlMode.Hybrid,
-                            _ => ControlMode.Hybrid
-                        };
-
-                        if (Config.Mode != selectedMode)
-                        {
-                            Config.Mode = selectedMode;
-                            ModHelper.WriteConfig(Config);
-                            ApplyNativeControlState();
-                            ModMonitor?.Log($"Mode kontrol diubah ke: {Config.Mode}", LogLevel.Info);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                ModMonitor?.Log($"Gagal memproses klik Options: {ex.Message}", LogLevel.Error);
-            }
-        }
+    public interface IGenericModConfigMenuApi
+    {
+        void Register(IManifest mod, Action reset, Action save, bool titleScreenOnly = false);
+        void AddBoolOption(IManifest mod, Func<bool> getValue, Action<bool> setValue, Func<string> name, Func<string>? tooltip = null, string? fieldId = null);
+        void AddTextOption(IManifest mod, Func<string> getValue, Action<string> setValue, Func<string> name, Func<string>? tooltip = null, string[]? allowedValues = null, Func<string, string>? formatAllowedValue = null, string? fieldId = null);
     }
 }
