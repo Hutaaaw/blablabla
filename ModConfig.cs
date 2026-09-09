@@ -3,8 +3,8 @@ namespace CinderJoyTap
     public enum ControlMode
     {
         JoypadOnly = 0,   // Hanya Virtual Joypad
-        TapToMove = 1,    // Hanya Tap to Move / CinderTap
-        Hybrid = 2        // MobileAtlas Native Joypad + CinderTap
+        TapToMove = 1,    // Hanya CinderTap
+        Hybrid = 2        // Joypad + CinderTap
     }
 
     public class ModConfig
