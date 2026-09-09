@@ -11,7 +11,7 @@ jobs:
     - name: Download References
       run: |
         mkdir -p $HOME/stardew_refs
-        curl -fL "[https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz](https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz)" -o /tmp/sdv_refs.tar.gz
+        curl -fL "https://github.com/StardewModders/mod-reference-assemblies/archive/refs/heads/main.tar.gz" -o /tmp/sdv_refs.tar.gz
         tar -xzf /tmp/sdv_refs.tar.gz -C $HOME/stardew_refs --strip-components=1
 
     - name: Build Mod
@@ -26,4 +26,3 @@ jobs:
       with:
         name: CinderJoyTap-Release
         path: publish/
-```eof
