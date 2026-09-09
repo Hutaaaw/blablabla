@@ -144,7 +144,7 @@ namespace CinderJoyTap
                 foreach (var element in __instance.options)
                 {
                     if (element is OptionsDropDown dropDown && 
-                       (element.label.Equals("Control Style", StringComparison.OrdinalIgnoreCase) || element.whichOption == 52))
+                       (element.label?.Equals("Control Style", StringComparison.OrdinalIgnoreCase) == true || element.whichOption == 52))
                     {
                         controlStyleDropDown = dropDown;
                         break;
@@ -179,7 +179,7 @@ namespace CinderJoyTap
                 bool hasAdjustBtn = false;
                 foreach (var element in __instance.options)
                 {
-                    if (element.whichOption == ADJUST_JOYSTICK_CUSTOM_ID || element.label.Equals("Adjust Joypad", StringComparison.OrdinalIgnoreCase))
+                    if (element.whichOption == ADJUST_JOYSTICK_CUSTOM_ID || element.label?.Equals("Adjust Joypad", StringComparison.OrdinalIgnoreCase) == true)
                     {
                         element.whichOption = ADJUST_JOYSTICK_CUSTOM_ID;
                         hasAdjustBtn = true;
@@ -326,7 +326,7 @@ namespace CinderJoyTap
             isDraggingInAdjust = false;
             ModHelper.WriteConfig(Config);
             RecalculatePosition();
-            Game1.addHUDMessage(new HUDMessage("Pengaturan Joystick Disimpan!", HUDMessage.newQuest_type));
+            Game1.addHUDMessage(new HUDMessage("Pengaturan Joystick Disimpan!", 2));
         }
 
         private void HandleTouchInput()
@@ -351,7 +351,7 @@ namespace CinderJoyTap
                         break;
                     }
                 }
-                else if ((touch.State == TouchLocationState.Moved || touch.State == TouchLocationState.StateThatDoesntExist) && touch.Id == activeTouchId)
+                else if (touch.State == TouchLocationState.Moved && touch.Id == activeTouchId)
                 {
                     foundActiveTouch = true;
                     UpdateKnobPosition(touchPos);
