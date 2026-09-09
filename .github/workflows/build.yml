@@ -1,0 +1,24 @@
+name: Build CinderJoystick Mod
+​on:
+push:
+branches: [ "main", "master" ]
+workflow_dispatch:
+​jobs:
+build:
+runs-on: ubuntu-latest
+​steps:
+- name: Checkout Code
+uses: actions/checkout@v4
+​- name: Setup .NET SDK
+uses: actions/setup-dotnet@v4
+with:
+dotnet-version: '6.0.x'
+​- name: Build Mod (Release)
+run: dotnet build -c Release
+​- name: Upload Mod Artifact
+uses: actions/upload-artifact@v4
+with:
+name: CinderJoystick-Release
+path: |
+bin/Release/net6.0/CinderJoystick.dll
+manifest.json
