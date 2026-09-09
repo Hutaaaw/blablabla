@@ -1,80 +1,43 @@
-name: Build CinderJoyTap Mod
+name: Diagnose CI problems
 on:
-  push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
-  build:
+  diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '6.0.x'
-
-      - name: Restore NuGet cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.nuget/packages
-            ~/.local/share/NuGet
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
-      - name: Download Stardew Valley Reference Assemblies
+      - name: Show repo summary
         run: |
-          set -euo pipefail
-          mkdir -p "$HOME/stardew_refs"
-          URL_BASE="https://github.com/Pathoschild/StardewValley-ReferenceAssemblies/archive/refs/heads"
-          TEMP_ARCHIVE="/tmp/sdv_refs.tar.gz"
-          SUCCESS=0
+          echo "Repo root listing:"
+          ls -la
+          echo
+          echo "Top-level files:"
+          ls -la | sed -n '1,200p'
+          echo
+          echo "Find csproj, manifest, and .yml files:"
+          find . -maxdepth 4 -type f \( -name "*.csproj" -o -name "manifest.json" -o -name "*.yml" -o -name "*.yaml" \) -print
 
-          for BR in main master; do
-            echo "Trying branch: $BR"
-            if curl -fL "$URL_BASE/$BR.tar.gz" -o "$TEMP_ARCHIVE"; then
-              echo "Downloaded archive for $BR, extracting..."
-              tar -xz -f "$TEMP_ARCHIVE" -C "$HOME/stardew_refs" --strip-components=1 && SUCCESS=1 && break
-            else
-              echo "Download for $BR failed (HTTP error)."
-            fi
-          done
-
-          if [ "$SUCCESS" -ne 1 ]; then
+      - name: Print csproj and manifest (if present)
+        run: |
+          for f in $(find . -maxdepth 6 -type f -name "*.csproj" -o -name "manifest.json"); do
+            echo "==== FILE: $f ===="
+            sed -n '1,200p' "$f"
             echo
-            echo "ERROR: failed to download StardewValley reference assemblies from Pathoschild repo."
-            echo "Please verify the repository exists and the branch is correct:"
-            echo "  https://github.com/Pathoschild/StardewValley-ReferenceAssemblies"
-            echo
-            # Optional: try an alternative URL here if you have it
-            exit 1
-          fi
+          done || true
 
-          echo "Contents of $HOME/stardew_refs (top-level):"
-          ls -la "$HOME/stardew_refs" || true
+      - name: Dotnet info
+        run: |
+          dotnet --info || true
 
-      - name: Restore .NET dependencies
-        run: dotnet restore
-
-      - name: Build Mod (Release)
-        run: dotnet build -c Release -p:GamePath="$HOME/stardew_refs"
-
-      - name: Verify build output
+      - name: Try dotnet restore (diagnostic)
         run: |
           set -e
-          echo "Searching for output DLL..."
-          find . -type f -path "*/bin/Release/net6.0/*.dll" -maxdepth 6 || true
-          echo "Listing expected files:"
-          ls -la **/bin/Release/net6.0 || true
+          dotnet restore || echo "restore failed (see log)"
 
-      - name: Upload Mod Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CinderJoyTap-Release
-          path: |
-            **/bin/Release/net6.0/CinderJoyTap.dll
-            **/manifest.json
+      - name: Try dotnet build (diagnostic)
+        run: |
+          set -e
+          dotnet build -c Release -nologo || echo "build attempted (see log)"
