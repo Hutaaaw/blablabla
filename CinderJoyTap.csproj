@@ -3,8 +3,8 @@
 <TargetFramework>net6.0</TargetFramework>
 <ImplicitUsings>enable</ImplicitUsings>
 <Nullable>enable</Nullable>
-<AssemblyName>CinderJoyTap</AssemblyName>
-<RootNamespace>CinderJoyTap</RootNamespace>
+<AssemblyName>CinderJoystick</AssemblyName>
+<RootNamespace>CinderJoystick</RootNamespace>
 <EnableHarmony>true</EnableHarmony>
 </PropertyGroup>
 ​<ItemGroup>
