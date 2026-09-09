@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
 using StardewModdingAPI;
@@ -27,6 +26,7 @@ namespace CinderJoyTap
             {
                 var harmony = new Harmony(ModManifest.UniqueID);
 
+                // Patch semua konstruktor OptionsPage
                 foreach (var ctor in typeof(OptionsPage).GetConstructors())
                 {
                     try
@@ -39,6 +39,7 @@ namespace CinderJoyTap
                     catch { }
                 }
 
+                // Patch method optionValueChange (Android)
                 var optionValueChangeMethod = AccessTools.Method(typeof(OptionsPage), "optionValueChange");
                 if (optionValueChangeMethod != null)
                 {
@@ -48,6 +49,7 @@ namespace CinderJoyTap
                     );
                 }
 
+                // Patch method receiveLeftClick
                 var receiveLeftClickMethod = AccessTools.Method(typeof(OptionsPage), nameof(OptionsPage.receiveLeftClick));
                 if (receiveLeftClickMethod != null)
                 {
@@ -82,6 +84,64 @@ namespace CinderJoyTap
         {
             if (!Config.Enabled || !Context.IsWorldReady) return;
             EnsureHybridControls();
+        }
+
+        private void EnsureHybridControls()
+        {
+            if (Config.Mode == ControlMode.Hybrid)
+            {
+                // Paksa status kontrol native Android ke '2' (Joypad + Tap-to-Move)
+                if (GetNativeControlStyle() != 2)
+                {
+                    SetNativeControlStyle(2);
+                }
+
+                // Cek apakah pemain sedang aktif menggerakkan Virtual Joypad / D-Pad
+                bool isManualInputActive = IsManualMovementPressed();
+
+                // HANYA batalkan pathfinding Tap-to-Move JIKA pemain aktif menyentuh Joypad
+                if (isManualInputActive && Game1.player != null && Game1.player.controller != null)
+                {
+                    Game1.player.controller = null;
+                }
+            }
+        }
+
+        private bool IsManualMovementPressed()
+        {
+            try
+            {
+                // 1. Cek input GamePad / Virtual Joypad Android (Analog & D-Pad)
+                Microsoft.Xna.Framework.Input.GamePadState padState = Game1.input.GetGamePadState();
+                if (padState.IsConnected)
+                {
+                    if (padState.ThumbSticks.Left.LengthSquared() > 0.05f ||
+                        padState.DPad.Up == Microsoft.Xna.Framework.Input.ButtonState.Pressed ||
+                        padState.DPad.Down == Microsoft.Xna.Framework.Input.ButtonState.Pressed ||
+                        padState.DPad.Left == Microsoft.Xna.Framework.Input.ButtonState.Pressed ||
+                        padState.DPad.Right == Microsoft.Xna.Framework.Input.ButtonState.Pressed)
+                    {
+                        return true;
+                    }
+                }
+
+                // 2. Cek input Keyboard / Virtual Keys (WASD & Panah)
+                Microsoft.Xna.Framework.Input.KeyboardState keyState = Game1.GetKeyboardState();
+                if (keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.W) || 
+                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.A) ||
+                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.S) || 
+                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.D) ||
+                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Up) || 
+                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Down) ||
+                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Left) || 
+                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Right))
+                {
+                    return true;
+                }
+            }
+            catch { }
+
+            return false;
         }
 
         public static void SetNativeControlStyle(int value)
@@ -241,25 +301,6 @@ namespace CinderJoyTap
                 case ControlMode.Hybrid:
                     SetNativeControlStyle(2);
                     break;
-            }
-        }
-
-        private void EnsureHybridControls()
-        {
-            if (Config.Mode == ControlMode.Hybrid)
-            {
-                if (GetNativeControlStyle() != 2)
-                {
-                    SetNativeControlStyle(2);
-                }
-
-                if (Game1.player != null && (Game1.player.isMoving() || Game1.oldPadState.IsButtonDown(Microsoft.Xna.Framework.Input.Buttons.DPadUp)))
-                {
-                    if (Game1.player.controller != null)
-                    {
-                        Game1.player.controller = null;
-                    }
-                }
             }
         }
 
