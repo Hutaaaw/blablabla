@@ -1,121 +1,95 @@
 using System;
-using HarmonyLib;
 using Microsoft.Xna.Framework;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
-using StardewValley.Menus;
 
 namespace CinderJoyTap
 {
+    /// <summary>
+    /// Mod Mediator (Penengah) antara CinderTap (Tap-to-Move) dan Joystick Overlay Cinderbox.
+    /// </summary>
     public class ModEntry : Mod
     {
         public static ModConfig Config { get; private set; } = new ModConfig();
-        public static IModHelper ModHelper { get; private set; } = null!;
-        public static IMonitor ModMonitor { get; private set; } = null!;
-
-        public const int CONTROL_STYLE_CUSTOM_ID = 987654;
 
         public override void Entry(IModHelper helper)
         {
             Config = helper.ReadConfig<ModConfig>();
-            ModHelper = helper;
-            ModMonitor = Monitor;
-
-            try
-            {
-                var harmony = new Harmony(ModManifest.UniqueID);
-
-                // Patch semua konstruktor OptionsPage
-                foreach (var ctor in typeof(OptionsPage).GetConstructors())
-                {
-                    try
-                    {
-                        harmony.Patch(
-                            original: ctor,
-                            postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionsPageConstructorPostfix))
-                        );
-                    }
-                    catch { }
-                }
-
-                // Patch method optionValueChange (Android)
-                var optionValueChangeMethod = AccessTools.Method(typeof(OptionsPage), "optionValueChange");
-                if (optionValueChangeMethod != null)
-                {
-                    harmony.Patch(
-                        original: optionValueChangeMethod,
-                        postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionValueChangePostfix))
-                    );
-                }
-
-                // Patch method receiveLeftClick
-                var receiveLeftClickMethod = AccessTools.Method(typeof(OptionsPage), nameof(OptionsPage.receiveLeftClick));
-                if (receiveLeftClickMethod != null)
-                {
-                    harmony.Patch(
-                        original: receiveLeftClickMethod,
-                        postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnReceiveLeftClickPostfix))
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                ModMonitor.Log($"Peringatan Harmony Patch: {ex.Message}", LogLevel.Warn);
-            }
 
             helper.Events.GameLoop.GameLaunched += OnGameLaunched;
             helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
-            helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
+            helper.Events.Input.ButtonsChanged += OnButtonsChanged;
+            helper.Events.Input.CursorMoved += OnCursorMoved;
         }
 
         private void OnGameLaunched(object? sender, GameLaunchedEventArgs e)
         {
-            ModMonitor.Log("CinderJoyTap berhasil dimuat.", LogLevel.Info);
-            RegisterGenericModConfigMenu();
-        }
+            Monitor.Log("CinderJoyTap Bridge (Mod Penengah CinderTap & Joystick) berhasil aktif.", LogLevel.Info);
 
-        private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e)
-        {
-            ApplyNativeControlState();
+            // Mengecek apakah CinderTap terdeteksi di daftar mod
+            bool hasCinderTap = Helper.ModRegistry.IsLoaded("Eky.CinderTap");
+            if (hasCinderTap)
+            {
+                Monitor.Log("Mod CinderTap terdeteksi! Sistem jembatan siap bekerja.", LogLevel.Info);
+            }
+            else
+            {
+                Monitor.Log("CinderTap tidak ditemukan. Mod ini akan tetap memantau input joystick.", LogLevel.Warn);
+            }
         }
 
         private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
         {
-            if (!Config.Enabled || !Context.IsWorldReady) return;
-            EnsureHybridControls();
-        }
+            if (!Config.Enabled || !Context.IsWorldReady || Game1.player == null) return;
 
-        private void EnsureHybridControls()
-        {
-            if (Config.Mode == ControlMode.Hybrid)
+            // 1. Cek apakah pemain sedang menggerakkan joystick manual
+            bool isManualMoving = IsJoystickOrKeyActive();
+
+            // 2. LOGIKA PENENGAH: Jika Joystick digerakkan saat CinderTap sedang berjalan (auto-walk)
+            if (isManualMoving && Game1.player.controller != null)
             {
-                // Paksa status kontrol native Android ke '2' (Joypad + Tap-to-Move)
-                if (GetNativeControlStyle() != 2)
-                {
-                    SetNativeControlStyle(2);
-                }
-
-                // Cek apakah pemain sedang aktif menggerakkan Virtual Joypad / D-Pad
-                bool isManualInputActive = IsManualMovementPressed();
-
-                // HANYA batalkan pathfinding Tap-to-Move JIKA pemain aktif menyentuh Joypad
-                if (isManualInputActive && Game1.player != null && Game1.player.controller != null)
-                {
-                    Game1.player.controller = null;
-                }
+                // Batalkan auto-walk CinderTap secara instan agar Joystick mengambil alih kendali penuh
+                Game1.player.controller = null;
+                Game1.player.Halt();
             }
         }
 
-        private bool IsManualMovementPressed()
+        private void OnButtonsChanged(object? sender, ButtonsChangedEventArgs e)
+        {
+            if (!Config.Enabled || !Context.IsWorldReady || Game1.player == null) return;
+
+            // Jika tombol fisik / virtual joystick baru saja ditekan, langsung hentikan pathfinding
+            if (IsJoystickOrKeyActive() && Game1.player.controller != null)
+            {
+                Game1.player.controller = null;
+                Game1.player.Halt();
+            }
+        }
+
+        private void OnCursorMoved(object? sender, CursorMovedEventArgs e)
+        {
+            if (!Config.Enabled || !Context.IsWorldReady || Game1.player == null) return;
+
+            // Jika pemain sedang menahan joystick analog, abai ketukan cursor yang tidak disengaja
+            if (IsJoystickOrKeyActive() && Game1.player.controller != null)
+            {
+                Game1.player.controller = null;
+            }
+        }
+
+        /// <summary>
+        /// Mendeteksi apakah input manual dari Virtual Joystick Cinderbox (WASD/Gamepad) sedang aktif.
+        /// </summary>
+        private bool IsJoystickOrKeyActive()
         {
             try
             {
-                // 1. Cek input GamePad / Virtual Joypad Android (Analog & D-Pad)
-                Microsoft.Xna.Framework.Input.GamePadState padState = Game1.input.GetGamePadState();
+                // A. Cek Analog Stick & D-Pad Gamepad Virtual Cinderbox (XInput)
+                var padState = Game1.input.GetGamePadState();
                 if (padState.IsConnected)
                 {
-                    if (padState.ThumbSticks.Left.LengthSquared() > 0.05f ||
+                    if (padState.ThumbSticks.Left.LengthSquared() > 0.04f ||
                         padState.DPad.Up == Microsoft.Xna.Framework.Input.ButtonState.Pressed ||
                         padState.DPad.Down == Microsoft.Xna.Framework.Input.ButtonState.Pressed ||
                         padState.DPad.Left == Microsoft.Xna.Framework.Input.ButtonState.Pressed ||
@@ -125,229 +99,32 @@ namespace CinderJoyTap
                     }
                 }
 
-                // 2. Cek input Keyboard / Virtual Keys (WASD & Panah)
-                Microsoft.Xna.Framework.Input.KeyboardState keyState = Game1.GetKeyboardState();
-                if (keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.W) || 
-                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.A) ||
-                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.S) || 
-                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.D) ||
-                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Up) || 
-                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Down) ||
-                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Left) || 
-                    keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.Right))
+                // B. Cek Input Keyboard Virtual WASD / Panah Arah
+                if (Helper.Input.IsDown(SButton.W) || Helper.Input.IsDown(SButton.A) ||
+                    Helper.Input.IsDown(SButton.S) || Helper.Input.IsDown(SButton.D) ||
+                    Helper.Input.IsDown(SButton.Up) || Helper.Input.IsDown(SButton.Left) ||
+                    Helper.Input.IsDown(SButton.Down) || Helper.Input.IsDown(SButton.Right))
+                {
+                    return true;
+                }
+
+                // C. Cek pergerakan karakter internal tanpa controller pathfinding
+                if (Game1.player != null && Game1.player.isMoving() && Game1.player.controller == null)
                 {
                     return true;
                 }
             }
-            catch { }
+            catch
+            {
+                // Menyerap exception jika input buffer belum siap
+            }
 
             return false;
         }
-
-        public static void SetNativeControlStyle(int value)
-        {
-            try
-            {
-                if (Game1.options == null) return;
-                var field = AccessTools.Field(typeof(Options), "controlStyle") 
-                         ?? AccessTools.Field(typeof(Options), "ControlStyle");
-                if (field != null)
-                {
-                    field.SetValue(Game1.options, value);
-                    return;
-                }
-
-                var prop = AccessTools.Property(typeof(Options), "controlStyle") 
-                        ?? AccessTools.Property(typeof(Options), "ControlStyle");
-                if (prop != null)
-                {
-                    prop.SetValue(Game1.options, value);
-                }
-            }
-            catch { }
-        }
-
-        public static int GetNativeControlStyle()
-        {
-            try
-            {
-                if (Game1.options == null) return 0;
-                var field = AccessTools.Field(typeof(Options), "controlStyle") 
-                         ?? AccessTools.Field(typeof(Options), "ControlStyle");
-                if (field != null)
-                    return Convert.ToInt32(field.GetValue(Game1.options));
-
-                var prop = AccessTools.Property(typeof(Options), "controlStyle") 
-                        ?? AccessTools.Property(typeof(Options), "ControlStyle");
-                if (prop != null)
-                    return Convert.ToInt32(prop.GetValue(Game1.options));
-            }
-            catch { }
-            return 0;
-        }
-
-        public static void OnOptionsPageConstructorPostfix(OptionsPage __instance)
-        {
-            try
-            {
-                if (__instance?.options == null) return;
-
-                bool customOptionExists = false;
-                foreach (var element in __instance.options)
-                {
-                    if (element != null && element.whichOption == CONTROL_STYLE_CUSTOM_ID)
-                    {
-                        customOptionExists = true;
-                        break;
-                    }
-                }
-
-                if (!customOptionExists)
-                {
-                    var dropDown = new OptionsDropDown("CinderJoy Control Scheme", CONTROL_STYLE_CUSTOM_ID);
-                    dropDown.dropDownOptions.Add("JoypadOnly");
-                    dropDown.dropDownDisplayOptions.Add("Joypad Only");
-
-                    dropDown.dropDownOptions.Add("TapToMove");
-                    dropDown.dropDownDisplayOptions.Add("Tap to Move");
-
-                    dropDown.dropDownOptions.Add("Hybrid");
-                    dropDown.dropDownDisplayOptions.Add("Hybrid (Joypad + Tap)");
-
-                    dropDown.selectedOption = Config.Mode switch
-                    {
-                        ControlMode.JoypadOnly => 0,
-                        ControlMode.TapToMove => 1,
-                        ControlMode.Hybrid => 2,
-                        _ => 2
-                    };
-
-                    __instance.options.Add(dropDown);
-                }
-            }
-            catch { }
-        }
-
-        public static void OnReceiveLeftClickPostfix(OptionsPage __instance)
-        {
-            try
-            {
-                if (__instance?.options == null) return;
-                foreach (var element in __instance.options)
-                {
-                    if (element != null && (element.whichOption == CONTROL_STYLE_CUSTOM_ID || element.whichOption == 52) && element is OptionsDropDown dropDown)
-                    {
-                        ControlMode selectedMode = dropDown.selectedOption switch
-                        {
-                            0 => ControlMode.JoypadOnly,
-                            1 => ControlMode.TapToMove,
-                            2 => ControlMode.Hybrid,
-                            _ => ControlMode.Hybrid
-                        };
-
-                        if (Config.Mode != selectedMode)
-                        {
-                            Config.Mode = selectedMode;
-                            ModHelper.WriteConfig(Config);
-                            ApplyNativeControlState();
-                            ModMonitor?.Log($"Skema Kontrol diubah via Options Menu ke: {Config.Mode}", LogLevel.Info);
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
-
-        public static void OnOptionValueChangePostfix(int whichOption, int value)
-        {
-            try
-            {
-                if (whichOption == CONTROL_STYLE_CUSTOM_ID || whichOption == 52)
-                {
-                    ControlMode selectedMode = value switch
-                    {
-                        0 => ControlMode.JoypadOnly,
-                        1 => ControlMode.TapToMove,
-                        2 => ControlMode.Hybrid,
-                        _ => ControlMode.Hybrid
-                    };
-
-                    if (Config.Mode != selectedMode)
-                    {
-                        Config.Mode = selectedMode;
-                        ModHelper.WriteConfig(Config);
-                        ApplyNativeControlState();
-                        ModMonitor?.Log($"Skema Kontrol diubah via Options Menu ke: {Config.Mode}", LogLevel.Info);
-                    }
-                }
-            }
-            catch { }
-        }
-
-        public static void ApplyNativeControlState()
-        {
-            if (!Context.IsWorldReady) return;
-
-            switch (Config.Mode)
-            {
-                case ControlMode.JoypadOnly:
-                    SetNativeControlStyle(0);
-                    break;
-
-                case ControlMode.TapToMove:
-                    SetNativeControlStyle(1);
-                    break;
-
-                case ControlMode.Hybrid:
-                    SetNativeControlStyle(2);
-                    break;
-            }
-        }
-
-        private void RegisterGenericModConfigMenu()
-        {
-            var configMenu = ModHelper.ModRegistry.GetApi<IGenericModConfigMenuApi>("spacechase0.GenericModConfigMenu");
-            if (configMenu == null) return;
-
-            configMenu.Register(
-                mod: ModManifest,
-                reset: () => Config = new ModConfig(),
-                save: () =>
-                {
-                    ModHelper.WriteConfig(Config);
-                    ApplyNativeControlState();
-                }
-            );
-
-            configMenu.AddBoolOption(
-                mod: ModManifest,
-                getValue: () => Config.Enabled,
-                setValue: value => Config.Enabled = value,
-                name: () => "Aktifkan Mod",
-                tooltip: () => "Aktifkan atau matikan fungsi CinderJoyTap."
-            );
-
-            configMenu.AddTextOption(
-                mod: ModManifest,
-                getValue: () => Config.Mode.ToString(),
-                setValue: value =>
-                {
-                    if (Enum.TryParse<ControlMode>(value, out var parsedMode))
-                    {
-                        Config.Mode = parsedMode;
-                    }
-                },
-                name: () => "Skema Kontrol",
-                tooltip: () => "Pilih mode kontrol: JoypadOnly, TapToMove, atau Hybrid.",
-                allowedValues: new[] { "JoypadOnly", "TapToMove", "Hybrid" }
-            );
-        }
     }
 
-    public interface IGenericModConfigMenuApi
+    public class ModConfig
     {
-        void Register(IManifest mod, Action reset, Action save, bool titleScreenOnly = false);
-        void AddBoolOption(IManifest mod, Func<bool> getValue, Action<bool> setValue, Func<string> name, Func<string>? tooltip = null, string? fieldId = null);
-        void AddTextOption(IManifest mod, Func<string> getValue, Action<string> setValue, Func<string> name, Func<string>? tooltip = null, string[]? allowedValues = null, Func<string, string>? formatAllowedValue = null, string? fieldId = null);
+        public bool Enabled { get; set; } = true;
     }
 }
