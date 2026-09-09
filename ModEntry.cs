@@ -187,7 +187,14 @@ namespace CinderJoyTap
 
                 if (!hasAdjustBtn)
                 {
-                    __instance.options.Add(new OptionsButton("Adjust Joypad", ADJUST_JOYSTICK_CUSTOM_ID));
+                    var adjustButton = new OptionsButton("Adjust Joypad", () =>
+                    {
+                        isAdjusting = true;
+                        Game1.activeClickableMenu = null;
+                        ModMonitor.Log("Masuk ke Mode Adjust Joypad.", LogLevel.Info);
+                    });
+                    adjustButton.whichOption = ADJUST_JOYSTICK_CUSTOM_ID;
+                    __instance.options.Add(adjustButton);
                 }
             }
             catch (Exception ex)
