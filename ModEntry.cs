@@ -10,7 +10,7 @@ using StardewValley;
 using StardewValley.BellsAndWhistles;
 using StardewValley.Menus;
 
-namespace CinderJoystick
+namespace CinderJoyTap
 {
     public interface IGenericModConfigMenuApi
     {
@@ -435,7 +435,7 @@ namespace CinderJoystick
 
             SpriteBatch spriteBatch = e.SpriteBatch;
 
-            // RENDERING MODE ADUSTMENT (OVERLAY LAYAR)
+            // RENDERING MODE ADJUSTMENT (OVERLAY LAYAR)
             if (isAdjusting)
             {
                 // Gelapkan background
