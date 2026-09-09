@@ -5,7 +5,6 @@
     <Nullable>enable</Nullable>
     <AssemblyName>CinderJoyTap</AssemblyName>
     <RootNamespace>CinderJoyTap</RootNamespace>
-    <EnableHarmoniousCode>true</EnableHarmoniousCode>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.1.1" />
