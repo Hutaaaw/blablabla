@@ -38,7 +38,7 @@ namespace CinderJoyTap
 
         private Texture2D? circleTexture;
 
-        // --- MODE ADJUSTMENT (IN-GAME SCREEN EDITOR) ---
+        // --- MODE ADJUSTMENT ---
         private static bool isAdjusting = false;
         private bool isDraggingInAdjust = false;
         private Rectangle saveButtonRect;
@@ -53,17 +53,16 @@ namespace CinderJoyTap
             ModHelper = helper;
             ModMonitor = Monitor;
 
-            // Harmony Patch untuk menyuntikkan menu Control Style & Adjust Joystick
             var harmony = new Harmony(ModManifest.UniqueID);
-            
+
             harmony.Patch(
                 original: AccessTools.Constructor(typeof(OptionsPage), new[] { typeof(int), typeof(int), typeof(int), typeof(int) }),
                 postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionsPageConstructorPostfix))
             );
 
             harmony.Patch(
-                original: AccessTools.Method(typeof(OptionsPage), nameof(OptionsPage.optionButtonClick)),
-                postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionButtonClickPostfix))
+                original: AccessTools.Method(typeof(OptionsPage), nameof(OptionsPage.receiveLeftClick)),
+                postfix: new HarmonyMethod(typeof(ModEntry), nameof(OnOptionsPageReceiveLeftClickPostfix))
             );
 
             helper.Events.GameLoop.GameLaunched += OnGameLaunched;
@@ -133,7 +132,7 @@ namespace CinderJoyTap
             knobPosition = joystickCenter;
         }
 
-        // --- HARMONY PATCHES UNTUK MENU OPTIONS NATIVE --- //
+        // --- HARMONY PATCHES ---
 
         public static void OnOptionsPageConstructorPostfix(OptionsPage __instance)
         {
@@ -143,7 +142,7 @@ namespace CinderJoyTap
 
                 foreach (var element in __instance.options)
                 {
-                    if (element is OptionsDropDown dropDown && 
+                    if (element is OptionsDropDown dropDown &&
                        (element.label?.Equals("Control Style", StringComparison.OrdinalIgnoreCase) == true || element.whichOption == 52))
                     {
                         controlStyleDropDown = dropDown;
@@ -175,7 +174,6 @@ namespace CinderJoyTap
                     };
                 }
 
-                // Tambahkan Tombol "Adjust Joypad" di bawah Control Style
                 bool hasAdjustBtn = false;
                 foreach (var element in __instance.options)
                 {
@@ -198,31 +196,44 @@ namespace CinderJoyTap
             }
         }
 
-        public static void OnOptionButtonClickPostfix(int whichOption, int selectedResult)
+        public static void OnOptionsPageReceiveLeftClickPostfix(OptionsPage __instance, int x, int y)
         {
-            if (whichOption == CONTROL_STYLE_CUSTOM_ID)
+            try
             {
-                Config.Mode = selectedResult switch
+                foreach (var element in __instance.options)
                 {
-                    0 => ControlMode.JoypadOnly,
-                    1 => ControlMode.TapToMove,
-                    2 => ControlMode.Hybrid,
-                    _ => ControlMode.Hybrid
-                };
+                    if (element.whichOption == CONTROL_STYLE_CUSTOM_ID && element is OptionsDropDown dropDown)
+                    {
+                        ControlMode selectedMode = dropDown.selectedOption switch
+                        {
+                            0 => ControlMode.JoypadOnly,
+                            1 => ControlMode.TapToMove,
+                            2 => ControlMode.Hybrid,
+                            _ => ControlMode.Hybrid
+                        };
 
-                ModHelper.WriteConfig(Config);
-                ModMonitor.Log($"Skema Kontrol diubah ke: {Config.Mode}", LogLevel.Info);
+                        if (Config.Mode != selectedMode)
+                        {
+                            Config.Mode = selectedMode;
+                            ModHelper.WriteConfig(Config);
+                            ModMonitor.Log($"Skema Kontrol diubah ke: {Config.Mode}", LogLevel.Info);
+                        }
+                    }
+                    else if (element.whichOption == ADJUST_JOYSTICK_CUSTOM_ID && element.bounds.Contains(x, y))
+                    {
+                        isAdjusting = true;
+                        Game1.activeClickableMenu = null;
+                        ModMonitor.Log("Masuk ke Mode Adjust Joypad.", LogLevel.Info);
+                    }
+                }
             }
-            else if (whichOption == ADJUST_JOYSTICK_CUSTOM_ID)
+            catch (Exception ex)
             {
-                // Masuk ke Mode Penyesuaian Posisi Joystick di Layar
-                isAdjusting = true;
-                Game1.activeClickableMenu = null; // Tutup menu Options agar layar penuh
-                ModMonitor.Log("Masuk ke Mode Adjust Joypad.", LogLevel.Info);
+                ModMonitor.Log($"Gagal memproses klik Options: {ex.Message}", LogLevel.Error);
             }
         }
 
-        // --- UPDATE & INPUT HANDLING --- //
+        // --- UPDATE & INPUT HANDLING ---
 
         private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
         {
@@ -265,14 +276,12 @@ namespace CinderJoyTap
 
                 if (touch.State == TouchLocationState.Pressed)
                 {
-                    // Cek Klik Tombol Save
                     if (saveButtonRect.Contains(pt))
                     {
                         SaveAndExitAdjustment();
                         return;
                     }
 
-                    // Cek Ukuran Size + / Size -
                     if (sizePlusRect.Contains(pt))
                     {
                         Config.BaseRadius = Math.Min(250f, Config.BaseRadius + 10f);
@@ -286,7 +295,6 @@ namespace CinderJoyTap
                         return;
                     }
 
-                    // Cek Opacity + / Opacity -
                     if (opacityPlusRect.Contains(pt))
                     {
                         Config.Opacity = Math.Min(1.0f, Config.Opacity + 0.1f);
@@ -298,7 +306,6 @@ namespace CinderJoyTap
                         return;
                     }
 
-                    // Cek Seret Joystick
                     if (Vector2.Distance(touchPos, joystickCenter) <= Config.BaseRadius * 1.5f)
                     {
                         isDraggingInAdjust = true;
@@ -309,7 +316,6 @@ namespace CinderJoyTap
                     joystickCenter = touchPos;
                     knobPosition = joystickCenter;
 
-                    // Update OffsetX dan OffsetY
                     Config.OffsetX = joystickCenter.X;
                     Config.OffsetY = Game1.uiViewport.Height - joystickCenter.Y;
                 }
@@ -326,7 +332,7 @@ namespace CinderJoyTap
             isDraggingInAdjust = false;
             ModHelper.WriteConfig(Config);
             RecalculatePosition();
-            Game1.addHUDMessage(new HUDMessage("Pengaturan Joystick Disimpan!", 2));
+            Game1.addHUDMessage(new HUDMessage("Pengaturan Joystick Disimpan!"));
         }
 
         private void HandleTouchInput()
@@ -405,17 +411,33 @@ namespace CinderJoyTap
             float speed = Game1.player.getMovementSpeed();
             Vector2 velocity = inputVector * speed;
 
-            Game1.player.SetMoving((byte)0);
+            Game1.player.Halt();
 
             if (Math.Abs(inputVector.X) > Math.Abs(inputVector.Y))
             {
-                if (inputVector.X > 0) Game1.player.SetMoving(Game1.SetMovingRight);
-                else Game1.player.SetMoving(Game1.SetMovingLeft);
+                if (inputVector.X > 0)
+                {
+                    Game1.player.SetMovingRight(true);
+                    Game1.player.FacingDirection = Game1.right;
+                }
+                else
+                {
+                    Game1.player.SetMovingLeft(true);
+                    Game1.player.FacingDirection = Game1.left;
+                }
             }
             else
             {
-                if (inputVector.Y > 0) Game1.player.SetMoving(Game1.SetMovingDown);
-                else Game1.player.SetMoving(Game1.SetMovingUp);
+                if (inputVector.Y > 0)
+                {
+                    Game1.player.SetMovingDown(true);
+                    Game1.player.FacingDirection = Game1.down;
+                }
+                else
+                {
+                    Game1.player.SetMovingUp(true);
+                    Game1.player.FacingDirection = Game1.up;
+                }
             }
 
             Game1.player.Position += velocity;
@@ -435,13 +457,10 @@ namespace CinderJoyTap
 
             SpriteBatch spriteBatch = e.SpriteBatch;
 
-            // RENDERING MODE ADJUSTMENT (OVERLAY LAYAR)
             if (isAdjusting)
             {
-                // Gelapkan background
                 spriteBatch.Draw(Game1.fadeToBlackRect, Game1.graphics.GraphicsDevice.Viewport.Bounds, Color.Black * 0.45f);
 
-                // Gambar Joystick Preview
                 Rectangle baseRectPreview = new Rectangle(
                     (int)(joystickCenter.X - Config.BaseRadius),
                     (int)(joystickCenter.Y - Config.BaseRadius),
@@ -458,31 +477,29 @@ namespace CinderJoyTap
                 );
                 spriteBatch.Draw(circleTexture, knobRectPreview, Color.White * 0.9f);
 
-                // Render UI Controls di bagian atas layar
                 int screenW = Game1.uiViewport.Width;
 
                 saveButtonRect = new Rectangle(screenW - 180, 20, 150, 60);
                 IClickableMenu.drawTextureBox(spriteBatch, saveButtonRect.X, saveButtonRect.Y, saveButtonRect.Width, saveButtonRect.Height, Color.White);
-                SpriteText.drawStringCenteredAt(spriteBatch, "OK / Save", saveButtonRect.Center.X, saveButtonRect.Center.Y - 12);
+                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "OK / Save", saveButtonRect.Center.X, saveButtonRect.Center.Y - 12);
 
                 sizeMinusRect = new Rectangle(20, 20, 60, 60);
                 sizePlusRect = new Rectangle(90, 20, 60, 60);
                 IClickableMenu.drawTextureBox(spriteBatch, sizeMinusRect.X, sizeMinusRect.Y, sizeMinusRect.Width, sizeMinusRect.Height, Color.White);
                 IClickableMenu.drawTextureBox(spriteBatch, sizePlusRect.X, sizePlusRect.Y, sizePlusRect.Width, sizePlusRect.Height, Color.White);
-                SpriteText.drawStringCenteredAt(spriteBatch, "-", sizeMinusRect.Center.X, sizeMinusRect.Center.Y - 12);
-                SpriteText.drawStringCenteredAt(spriteBatch, "+", sizePlusRect.Center.X, sizePlusRect.Center.Y - 12);
+                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "-", sizeMinusRect.Center.X, sizeMinusRect.Center.Y - 12);
+                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "+", sizePlusRect.Center.X, sizePlusRect.Center.Y - 12);
 
                 opacityMinusRect = new Rectangle(180, 20, 60, 60);
                 opacityPlusRect = new Rectangle(250, 20, 60, 60);
                 IClickableMenu.drawTextureBox(spriteBatch, opacityMinusRect.X, opacityMinusRect.Y, opacityMinusRect.Width, opacityMinusRect.Height, Color.White);
                 IClickableMenu.drawTextureBox(spriteBatch, opacityPlusRect.X, opacityPlusRect.Y, opacityPlusRect.Width, opacityPlusRect.Height, Color.White);
-                SpriteText.drawStringCenteredAt(spriteBatch, "O-", opacityMinusRect.Center.X, opacityMinusRect.Center.Y - 12);
-                SpriteText.drawStringCenteredAt(spriteBatch, "O+", opacityPlusRect.Center.X, opacityPlusRect.Center.Y - 12);
+                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "O-", opacityMinusRect.Center.X, opacityMinusRect.Center.Y - 12);
+                SpriteText.drawStringHorizontallyCenteredAt(spriteBatch, "O+", opacityPlusRect.Center.X, opacityPlusRect.Center.Y - 12);
 
                 return;
             }
 
-            // RENDERING GAMEPLAY NORMAL
             if (Config.Mode == ControlMode.TapToMove || !Context.IsWorldReady || Game1.activeClickableMenu != null || Game1.eventUp)
                 return;
 
